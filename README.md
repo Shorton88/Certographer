@@ -58,23 +58,39 @@ Common TLS ports and example services
   - 2087: WHM (WebHost Manager HTTPS)
   - 2096: cPanel webmail HTTPS
   - 2078: cPanel webmail HTTP with TLS upgrade
-
-
+\n
+\n
 ___________________________________________
 #QucikStart#
  1. Download the repository zip file and extract it to a folder
+
  2. Create a new virtual environment (assuming terminal is already in the extracted directory)
+    
     a. Windows
+    
       `py -m venv venv`
+
     b. Nix
+    
       `python3 -m venv venv`
+    
  3. Install requirements
+    
     a. Windows
+    
       `py -m pip install -r requirements.txt`
+    
     b. Nix
+    
       `python3 -m pip install -r requirements.txt`
+    
  4. Run a network scan exporting json results to a folder
+    
     a. Windows
+    
       `py Certographer.py --target 192.168.1.0/24 --output "testscan.json" --workers 1500`
+    
     b. Nix
+    
       `python3 Certographer.py --target 192.168.1.0/24 --output "testscan.json" --workers 1500`
+    
