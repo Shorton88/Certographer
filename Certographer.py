@@ -201,16 +201,12 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument(
-        "--cidr",
-        action="append",
-        help=(
-            "CIDR range to scan (repeatable). Defaults to RFC1918 ranges if omitted."
-        ),
-    )
-    parser.add_argument(
         "--target",
         action="append",
-        help="Target CIDR or DNS name to scan (repeatable).",
+        help=(
+            "Target CIDR range, DNS name, or hostname,ip pair to scan (repeatable). "
+            "Defaults to RFC1918 ranges if omitted."
+        ),
     )
     parser.add_argument(
         "--port",
@@ -258,9 +254,9 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--no-reverse-dns",
+        "--reverse-dns",
         action="store_true",
-        help="Disable reverse DNS lookups and verification.",
+        help="Enable reverse DNS lookups and verification.",
     )
     return parser.parse_args()
 
@@ -271,13 +267,20 @@ def iter_targets(cidrs: list[str], ports: list[int]):
         for ip in network.hosts():
             ip_str = str(ip)
             for port in ports:
-                yield ip_str, port, []
+                yield ip_str, port, [], cidr
 
 
-def iter_hostname_targets(ip_to_names: dict[str, list[str]], ports: list[int]):
+def iter_hostname_targets(
+    ip_to_names: dict[str, list[str]],
+    ip_to_scan_targets: dict[str, list[str]],
+    ports: list[int],
+):
     for ip, names in ip_to_names.items():
+        deduped_names = list(dict.fromkeys(names))
+        scan_targets = ip_to_scan_targets.get(ip, deduped_names)
+        scan_target = ",".join(dict.fromkeys(scan_targets))
         for port in ports:
-            yield ip, port, names
+            yield ip, port, deduped_names, scan_target
 
 
 def count_targets(cidrs: list[str], ip_to_names: dict[str, list[str]], ports: list[int]) -> int:
@@ -300,16 +303,38 @@ def count_hosts(cidrs: list[str]) -> int:
     return total_hosts
 
 
-def parse_targets(targets: list[str]) -> tuple[list[str], list[str]]:
+def parse_targets(
+    targets: list[str],
+) -> tuple[list[str], list[str], dict[str, list[str]]]:
     cidrs: list[str] = []
     hostnames: list[str] = []
-    for target in targets:
+    hostname_ip_pairs: dict[str, list[str]] = {}
+    for raw_target in targets:
+        target = raw_target.strip()
+        if not target:
+            continue
+        if "," in target:
+            hostname_part, ip_part = (part.strip() for part in target.split(",", 1))
+            if not hostname_part or not ip_part:
+                raise ValueError(
+                    f"Invalid --target value '{raw_target}'. "
+                    "Expected format hostname,ip for host/IP pairs."
+                )
+            try:
+                ip = str(ipaddress.ip_address(ip_part))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid IP in --target value '{raw_target}'. "
+                    "Expected format hostname,ip."
+                ) from exc
+            hostname_ip_pairs.setdefault(ip, []).append(hostname_part)
+            continue
         try:
             ipaddress.ip_network(target, strict=False)
             cidrs.append(target)
         except ValueError:
             hostnames.append(target)
-    return cidrs, hostnames
+    return cidrs, hostnames, hostname_ip_pairs
 
 
 def resolve_hostnames_to_ips(
@@ -337,11 +362,12 @@ def enqueue_targets(
     cidrs: list[str],
     ports: list[int],
     ip_to_names: dict[str, list[str]],
+    ip_to_scan_targets: dict[str, list[str]],
     worker_count: int,
 ) -> None:
     for target in iter_targets(cidrs, ports):
         task_queue.put(target)
-    for target in iter_hostname_targets(ip_to_names, ports):
+    for target in iter_hostname_targets(ip_to_names, ip_to_scan_targets, ports):
         task_queue.put(target)
     for _ in range(worker_count):
         task_queue.put(None)
@@ -451,6 +477,10 @@ def scan_target(
     scan_start: str,
     input_names: list[str],
     include_ip_results: bool,
+    include_reverse_dns_fields: bool,
+    scan_target: str,
+    dns_servers_used: list[str],
+    reverse_dns_used: bool,
 ) -> list[dict] | None:
     def _merge_names(*name_lists: list[str]) -> list[str]:
         merged: list[str] = []
@@ -542,8 +572,12 @@ def scan_target(
         result = cert_to_result(ip, port, cert, cert_der, scan_start)
         result["tls_version"] = tls_version
         result["server_hostname"] = hostname
-        result["reverse_dns"] = reverse_names
-        result["reverse_dns_verified"] = verified_names
+        result["scan_target"] = scan_target
+        result["dns_servers"] = dns_servers_used
+        result["reverse_dns_used"] = reverse_dns_used
+        if include_reverse_dns_fields:
+            result["reverse_dns"] = reverse_names
+            result["reverse_dns_verified"] = verified_names
         results.append(result)
 
     if include_ip_results or not results:
@@ -552,8 +586,12 @@ def scan_target(
             result = cert_to_result(ip, port, cert, cert_der, scan_start)
             result["tls_version"] = tls_version
             result["server_hostname"] = ip
-            result["reverse_dns"] = reverse_names
-            result["reverse_dns_verified"] = verified_names
+            result["scan_target"] = scan_target
+            result["dns_servers"] = dns_servers_used
+            result["reverse_dns_used"] = reverse_dns_used
+            if include_reverse_dns_fields:
+                result["reverse_dns"] = reverse_names
+                result["reverse_dns_verified"] = verified_names
             results.append(result)
 
     if not results:
@@ -590,13 +628,14 @@ def worker(
             legacy_context = None
 
     resolver = build_dns_resolver(dns_servers, timeout) if enable_reverse_dns else None
+    dns_servers_used = list(dns_servers) if dns_servers else ["system"]
 
     while True:
         item = task_queue.get()
         if item is None:
             task_queue.task_done()
             break
-        ip, port, input_names = item
+        ip, port, input_names, task_scan_target = item
         try:
             if enable_reverse_dns:
                 reverse_names, verified_names = resolve_hostnames(ip, dns_servers, resolver)
@@ -613,13 +652,17 @@ def worker(
                 scan_start,
                 input_names,
                 include_ip_results,
+                enable_reverse_dns,
+                task_scan_target,
+                dns_servers_used,
+                enable_reverse_dns,
             )
             if results:
                 for result in results:
                     stats.record(ip, result)
                     result_queue.put(result)
         except Exception:
-            pass
+            logging.exception("Worker failed for target ip=%s port=%s", ip, port)
         finally:
             progress.increment()
             task_queue.task_done()
@@ -765,24 +808,40 @@ def main() -> None:
         )
         logging.error("Custom DNS servers requested but dnspython not installed.")
         return
-    cidrs = list(args.cidr or [])
+    cidrs: list[str] = []
     target_cidrs: list[str] = []
     target_hostnames: list[str] = []
+    target_hostname_ip_pairs: dict[str, list[str]] = {}
     if args.target:
-        target_cidrs, target_hostnames = parse_targets(args.target)
+        try:
+            target_cidrs, target_hostnames, target_hostname_ip_pairs = parse_targets(
+                args.target
+            )
+        except ValueError as exc:
+            print(str(exc), file=os.sys.stderr)
+            logging.error("Invalid --target input: %s", exc)
+            return
         cidrs.extend(target_cidrs)
-    if not cidrs and not target_hostnames:
+    if not cidrs and not target_hostnames and not target_hostname_ip_pairs:
         cidrs = list(DEFAULT_CIDRS)
 
     ports = args.port if args.port else list(DEFAULT_PORTS)
     logging.info("CIDRs: %s", cidrs)
     if target_hostnames:
         logging.info("Hostnames: %s", target_hostnames)
+    if target_hostname_ip_pairs:
+        logging.info("Hostname/IP pairs: %s", target_hostname_ip_pairs)
     logging.info("Ports: %s", ports)
 
     ip_to_names, unresolved = resolve_hostnames_to_ips(
         target_hostnames, args.dns_server, args.timeout
     )
+    ip_to_scan_targets: dict[str, list[str]] = {
+        ip: list(names) for ip, names in ip_to_names.items()
+    }
+    for ip, names in target_hostname_ip_pairs.items():
+        ip_to_names.setdefault(ip, []).extend(names)
+        ip_to_scan_targets.setdefault(ip, []).extend(f"{name},{ip}" for name in names)
     if unresolved:
         logging.warning("Unresolved hostnames: %s", unresolved)
 
@@ -810,7 +869,7 @@ def main() -> None:
                 scan_start,
                 stats,
                 args.include_ip_results,
-                not args.no_reverse_dns,
+                args.reverse_dns,
             ),
             daemon=True,
         )
@@ -827,7 +886,7 @@ def main() -> None:
 
     producer = threading.Thread(
         target=enqueue_targets,
-        args=(task_queue, cidrs, ports, ip_to_names, len(workers)),
+        args=(task_queue, cidrs, ports, ip_to_names, ip_to_scan_targets, len(workers)),
         daemon=True,
     )
     producer.start()
