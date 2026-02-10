@@ -91,6 +91,9 @@ When `--reverse-dns` is enabled, results also include:
 - `reverse_dns`
 - `reverse_dns_verified`
 
+`reverse_dns` contains PTR hostnames returned for the scanned IP.  
+`reverse_dns_verified` is the subset of those names that pass forward-confirmation (the hostname resolves back to the same IP).
+
 ## Defaults
 
 - CIDR ranges: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
