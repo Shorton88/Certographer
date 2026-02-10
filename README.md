@@ -1,6 +1,6 @@
 # Certographer
 
-Certographer scans internal IP ranges and host targets for TLS certificates, then outputs JSON results.
+Certographer scans internal IP ranges and host targets for TLS certificates, then outputs JSON results. It's like a map builder for certificates... a certificate cartographer if you will. Get it ? :P
 
 ## Usage
 
