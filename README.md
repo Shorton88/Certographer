@@ -77,6 +77,7 @@ python3 Certographer.py --target 192.168.100.0/24 --reverse-dns --include-ip-res
 - `--output`: Write JSON output to a file.
 - `--include-ip-results`: Include IP-only TLS results even when hostname/SNI results are found.
 - `--reverse-dns`: Enable reverse DNS lookups and verification (default is off).
+- `--description`: Adds an optional `scan_description` field to the output.
 
 ## Output Metadata
 
@@ -97,7 +98,7 @@ When `--reverse-dns` is enabled, results also include:
 ## Defaults
 
 - CIDR ranges: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
-- Ports: `443, 4443, 4433, 4444, 80, 8000, 8080, 8089, 8443, 8444, 9443, 9444, 10443, 12443, 2083, 2087, 2096, 2078`
+- Ports: `3389, 443, 4443, 4433, 4444, 80, 8000, 8080, 8089, 8443, 8444, 9443, 9444, 10443, 12443, 2083, 2087, 2096, 2078`
 - Workers: `min(512, CPU count * 32)`
 - Timeout: `1.5` seconds
 - Queue size: `20000`
@@ -132,6 +133,7 @@ python3 Certographer.py --target 192.168.1.0/24 --output testscan.json --workers
 
 ## Common TLS Ports and Example Services
 
+- `3389`: Remote Desktop Protocol (RDP)
 - `443`: HTTPS (web apps, reverse proxies, APIs)
 - `4443`: Alternate HTTPS (admin consoles, appliance UIs)
 - `4433`: Alternate HTTPS (custom web services, embedded devices)

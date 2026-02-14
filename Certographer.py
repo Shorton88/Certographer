@@ -20,7 +20,7 @@ except ImportError:
 
 
 DEFAULT_CIDRS = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-DEFAULT_PORTS = (443,4443,4433,4444,80,8000,8080,8089,8443,8444,9443,9444,10443,12443,2083,2087,2096,2078)
+DEFAULT_PORTS = (3389, 443,4443,4433,4444,80,8000,8080,8089,8443,8444,9443,9444,10443,12443,2083,2087,2096,2078)
 
 _dns_cache_lock = threading.Lock()
 _reverse_dns_cache: dict[tuple[str, tuple[str, ...]], list[str]] = {}
@@ -258,6 +258,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable reverse DNS lookups and verification.",
     )
+    parser.add_argument(
+        "--description",
+        help="Optional scan description to include as scan_description in output.",
+    )
     return parser.parse_args()
 
 
@@ -418,6 +422,7 @@ def cert_to_result(
     cert: dict,
     cert_der: bytes | None,
     scan_start: str,
+    scan_description: str | None = None,
 ) -> dict:
     subject = cert.get("subject", ())
     issuer = cert.get("issuer", ())
@@ -445,7 +450,7 @@ def cert_to_result(
     sans = [value for _, value in cert.get("subjectAltName", ())]
     parsed = _parse_cert_details(cert_der)
     
-    return {
+    result = {
         "scan_date": scan_start,
         "ip": ip,
         "port": port,
@@ -464,6 +469,9 @@ def cert_to_result(
         "self_signed": subject == issuer,
         "scan_source": "Certographer",
     }
+    if scan_description:
+        result["scan_description"] = scan_description
+    return result
 
 
 def scan_target(
@@ -481,6 +489,7 @@ def scan_target(
     scan_target: str,
     dns_servers_used: list[str],
     reverse_dns_used: bool,
+    scan_description: str | None,
 ) -> list[dict] | None:
     def _merge_names(*name_lists: list[str]) -> list[str]:
         merged: list[str] = []
@@ -569,7 +578,9 @@ def scan_target(
         cert, cert_der, tls_version = _fetch_for_hostname(hostname)
         if not cert:
             continue
-        result = cert_to_result(ip, port, cert, cert_der, scan_start)
+        result = cert_to_result(
+            ip, port, cert, cert_der, scan_start, scan_description
+        )
         result["tls_version"] = tls_version
         result["server_hostname"] = hostname
         result["scan_target"] = scan_target
@@ -583,7 +594,9 @@ def scan_target(
     if include_ip_results or not results:
         cert, cert_der, tls_version = _fetch_for_ip()
         if cert:
-            result = cert_to_result(ip, port, cert, cert_der, scan_start)
+            result = cert_to_result(
+                ip, port, cert, cert_der, scan_start, scan_description
+            )
             result["tls_version"] = tls_version
             result["server_hostname"] = ip
             result["scan_target"] = scan_target
@@ -609,6 +622,7 @@ def worker(
     stats: ScanStats,
     include_ip_results: bool,
     enable_reverse_dns: bool,
+    scan_description: str | None,
 ) -> None:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
@@ -656,6 +670,7 @@ def worker(
                 task_scan_target,
                 dns_servers_used,
                 enable_reverse_dns,
+                scan_description,
             )
             if results:
                 for result in results:
@@ -870,6 +885,7 @@ def main() -> None:
                 stats,
                 args.include_ip_results,
                 args.reverse_dns,
+                args.description,
             ),
             daemon=True,
         )
