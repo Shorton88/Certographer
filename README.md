@@ -2,11 +2,31 @@
 
 Certographer scans internal IP ranges and host targets for TLS certificates, then outputs JSON results. It's like a map builder for certificates... a certificate cartographer if you will. Get it ? :P
 
-## Usage
+## Quick Start
+
+1. Download and extract the repository.
+2. Create a virtual environment.
+3. Install requirements.
+4. Run a scan.
+
+### Windows
 
 ```bash
-python3 Certographer.py
+py -m venv venv
+venv\Scripts\activate
+py -m pip install -r requirements.txt
+py Certographer.py --target 192.168.1.0/24 --output testscan.json --workers 1500
 ```
+
+### macOS/Linux
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 Certographer.py --target 192.168.1.0/24 --output testscan.json --workers 1500
+```
+
 
 ## Target Types (`--target`, repeatable)
 
@@ -106,30 +126,6 @@ When `--reverse-dns` is enabled, results also include:
 - JSON Lines: `off`
 - Output file: `stdout`
 
-## Quick Start
-
-1. Download and extract the repository.
-2. Create a virtual environment.
-3. Install requirements.
-4. Run a scan.
-
-### Windows
-
-```bash
-py -m venv venv
-venv\Scripts\activate
-py -m pip install -r requirements.txt
-py Certographer.py --target 192.168.1.0/24 --output testscan.json --workers 1500
-```
-
-### macOS/Linux
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-python3 -m pip install -r requirements.txt
-python3 Certographer.py --target 192.168.1.0/24 --output testscan.json --workers 1500
-```
 
 ## Common TLS Ports and Example Services
 
